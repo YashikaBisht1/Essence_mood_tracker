@@ -1,7 +1,7 @@
 import { createGroq } from "@ai-sdk/groq"
 
 const groq = createGroq({
-  apiKey: "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",
+  apiKey: "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",
 })
 
 export { groq }
