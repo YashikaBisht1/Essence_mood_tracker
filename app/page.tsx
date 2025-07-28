@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { HeroSection } from "@/components/hero-section"
 import { PersonaChat } from "@/components/persona-chat"
 import { CreativeStudio } from "@/components/creative-studio"
@@ -14,13 +15,12 @@ import { personas } from "@/lib/personas"
 import type { Persona } from "@/types/persona"
 
 export default function MoodTracker() {
-  const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null)
-  const [showRitualExperience, setShowRitualExperience] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [showTraining, setShowTraining] = useState(false)
-  const [showShadowUnlock, setShowShadowUnlock] = useState(false)
-  const [showMoodJournal, setShowMoodJournal] = useState(false)
-  const [showDreamscape, setShowDreamscape] = useState(false)
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const view = searchParams.get("view") || "hero" // Default to 'hero' view
+  const personaId = searchParams.get("persona")
+
   const [userPoints, setUserPoints] = useState(0)
   const [unlockedShadows, setUnlockedShadows] = useState<string[]>([])
   const [userMood, setUserMood] = useState(5) // Default mood level
@@ -36,88 +36,151 @@ export default function MoodTracker() {
     if (savedMood) setUserMood(Number.parseInt(savedMood))
   }, [])
 
-  const addPoints = (points: number) => {
-    const newPoints = userPoints + points
-    setUserPoints(newPoints)
-    localStorage.setItem("userPoints", newPoints.toString())
-  }
+  const addPoints = useCallback((points: number) => {
+    setUserPoints((prevPoints) => {
+      const newPoints = prevPoints + points
+      localStorage.setItem("userPoints", newPoints.toString())
+      return newPoints
+    })
+  }, [])
 
-  const unlockShadow = (shadowId: string) => {
-    const newShadows = [...unlockedShadows, shadowId]
-    setUnlockedShadows(newShadows)
-    localStorage.setItem("unlockedShadows", JSON.stringify(newShadows))
-  }
+  const unlockShadow = useCallback((shadowId: string) => {
+    setUnlockedShadows((prevShadows) => {
+      const newShadows = [...prevShadows, shadowId]
+      localStorage.setItem("unlockedShadows", JSON.stringify(newShadows))
+      return newShadows
+    })
+  }, [])
 
-  if (showRitualExperience && selectedPersona) {
-    return (
-      <RitualExperience
-        persona={selectedPersona}
-        onClose={() => setShowRitualExperience(false)}
-        onAddPoints={addPoints}
-        userMood={userMood}
-      />
-    )
-  }
+  const spendPoints = useCallback((points: number) => {
+    setUserPoints((prevPoints) => {
+      const newPoints = prevPoints - points
+      localStorage.setItem("userPoints", newPoints.toString())
+      return newPoints
+    })
+  }, [])
 
-  if (showSettings) {
-    return <SettingsPanel onClose={() => setShowSettings(false)} />
-  }
+  const selectedPersona = personaId ? personas.find((p) => p.id === personaId) : null
 
-  if (showTraining) {
-    return <PersonaTraining onClose={() => setShowTraining(false)} />
-  }
+  const navigateTo = useCallback(
+    (newView: string, newPersonaId?: string) => {
+      const params = new URLSearchParams()
+      params.set("view", newView)
+      if (newPersonaId) {
+        params.set("persona", newPersonaId)
+      } else if (personaId) {
+        params.set("persona", personaId) // Keep persona if not explicitly changed
+      }
+      router.push(`/?${params.toString()}`)
+    },
+    [router, personaId],
+  )
 
-  if (showShadowUnlock) {
-    return (
-      <ShadowUnlock
-        onClose={() => setShowShadowUnlock(false)}
-        userPoints={userPoints}
-        unlockedShadows={unlockedShadows}
-        onUnlockShadow={unlockShadow}
-        onSpendPoints={(points) => setUserPoints(userPoints - points)}
-      />
-    )
-  }
+  const handleBack = useCallback(() => {
+    router.back()
+  }, [router])
 
-  if (showMoodJournal) {
-    return <MoodJournal onClose={() => setShowMoodJournal(false)} onAddPoints={addPoints} />
-  }
+  const handleSelectPersona = useCallback(
+    (persona: Persona) => {
+      navigateTo("chat", persona.id)
+    },
+    [navigateTo],
+  )
 
-  if (showDreamscape) {
-    return <DreamscapeExplorer onClose={() => setShowDreamscape(false)} onAddPoints={addPoints} />
-  }
+  const handleShowRitualExperience = useCallback(() => {
+    navigateTo("ritual")
+  }, [navigateTo])
 
-  if (selectedPersona) {
-    return (
-      <div className="flex h-screen bg-slate-950">
-        <PersonaChat
-          persona={selectedPersona}
-          onBack={() => setSelectedPersona(null)}
-          onAddPoints={addPoints}
-          userPoints={userPoints}
-        />
-        <CreativeStudio
-          persona={selectedPersona}
-          onShowWeeklyRitual={() => setShowRitualExperience(true)}
-          onShowSettings={() => setShowSettings(false)}
-          onShowTraining={() => setShowTraining(true)}
-          onShowShadowUnlock={() => setShowShadowUnlock(true)}
-          onShowMoodJournal={() => setShowMoodJournal(true)}
-          onShowDreamscape={() => setShowDreamscape(true)}
+  const handleShowSettings = useCallback(() => {
+    navigateTo("settings")
+  }, [navigateTo])
+
+  const handleShowTraining = useCallback(() => {
+    navigateTo("training")
+  }, [navigateTo])
+
+  const handleShowShadowUnlock = useCallback(() => {
+    navigateTo("shadow-unlock")
+  }, [navigateTo])
+
+  const handleShowMoodJournal = useCallback(() => {
+    navigateTo("mood-journal")
+  }, [navigateTo])
+
+  const handleShowDreamscape = useCallback(() => {
+    navigateTo("dreamscape")
+  }, [navigateTo])
+
+  switch (view) {
+    case "ritual":
+      if (selectedPersona) {
+        return (
+          <RitualExperience
+            persona={selectedPersona}
+            onClose={handleBack}
+            onAddPoints={addPoints}
+            userMood={userMood}
+          />
+        )
+      }
+      // Fallback to hero if no persona selected for ritual
+      router.replace("/")
+      return null
+    case "settings":
+      return <SettingsPanel onClose={handleBack} />
+    case "training":
+      return <PersonaTraining onClose={handleBack} />
+    case "shadow-unlock":
+      return (
+        <ShadowUnlock
+          onClose={handleBack}
           userPoints={userPoints}
           unlockedShadows={unlockedShadows}
-          userMood={userMood}
+          onUnlockShadow={unlockShadow}
+          onSpendPoints={spendPoints}
         />
-      </div>
-    )
+      )
+    case "mood-journal":
+      return <MoodJournal onClose={handleBack} onAddPoints={addPoints} />
+    case "dreamscape":
+      return <DreamscapeExplorer onClose={handleBack} onAddPoints={addPoints} />
+    case "chat":
+      if (selectedPersona) {
+        return (
+          <div className="flex h-screen bg-slate-950">
+            <PersonaChat
+              persona={selectedPersona}
+              onBack={handleBack}
+              onAddPoints={addPoints}
+              userPoints={userPoints}
+            />
+            <CreativeStudio
+              persona={selectedPersona}
+              onShowWeeklyRitual={handleShowRitualExperience}
+              onShowSettings={handleShowSettings}
+              onShowTraining={handleShowTraining}
+              onShowShadowUnlock={handleShowShadowUnlock}
+              onShowMoodJournal={handleShowMoodJournal}
+              onShowDreamscape={handleShowDreamscape}
+              userPoints={userPoints}
+              unlockedShadows={unlockedShadows}
+              userMood={userMood}
+            />
+          </div>
+        )
+      }
+      // Fallback to hero if no persona selected for chat
+      router.replace("/")
+      return null
+    case "hero":
+    default:
+      return (
+        <HeroSection
+          personas={personas}
+          onSelectPersona={handleSelectPersona}
+          userPoints={userPoints}
+          onShowMoodJournal={handleShowMoodJournal}
+        />
+      )
   }
-
-  return (
-    <HeroSection
-      personas={personas}
-      onSelectPersona={setSelectedPersona}
-      userPoints={userPoints}
-      onShowMoodJournal={() => setShowMoodJournal(true)}
-    />
-  )
 }
