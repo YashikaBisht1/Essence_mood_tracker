@@ -4,6 +4,9 @@
 
 The Essence Mood Tracker is an AI-powered application designed to help users explore their inner world through interactive personas, guided rituals, and reflective journaling. It aims to provide a multi-sensory experience that supports emotional well-being, self-discovery, and personal growth. The application features dynamic content generation, personalized experiences, and integration with external services like Spotify for mood-based playlist suggestions.
 
+**##Flowchart**
+<img width="1024" height="1024" alt="ChatGPT Image Jul 28, 2025, 11_10_15 PM" src="https://github.com/user-attachments/assets/1d4f9307-b897-4439-90f0-43cfe378c46e" />
+
 ## Technologies and Libraries Used
 
 This project is built with modern web technologies and leverages several key libraries to deliver a rich user experience:
