@@ -119,7 +119,7 @@ You should respond in character, using your unique speaking style and drawing fr
         content: msg.content,
       }))
 
-      // Make API call to the new server route
+      // Make API call to the new server route with RAG support
       const apiResponse = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -127,7 +127,7 @@ You should respond in character, using your unique speaking style and drawing fr
         },
         body: JSON.stringify({
           messages: contextMessages,
-          personaContext: generatePersonaContext(),
+          personaId: persona.id, // Use persona ID for RAG-enhanced responses
         }),
       })
 
@@ -138,6 +138,12 @@ You should respond in character, using your unique speaking style and drawing fr
 
       const data = await apiResponse.json()
       const responseContent = data.content
+      const metadata = data.metadata // RAG metadata for debugging
+
+      // Log RAG information for development
+      if (metadata) {
+        console.log(`RAG Info - Query Type: ${metadata.queryType}, Agent: ${metadata.agentType}, Context Used: ${metadata.contextUsed}`)
+      }
 
       const personaMessage: Message = {
         id: (Date.now() + 1).toString(),

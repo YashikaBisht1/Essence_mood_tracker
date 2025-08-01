@@ -1,6 +1,37 @@
-// Simple embedding service using local computation
+import { pipeline, Pipeline } from '@xenova/transformers'
+
+// Enhanced embedding service using Hugging Face transformers
 export class EmbeddingService {
   private cache: Map<string, number[]> = new Map()
+  private extractor: Pipeline | null = null
+  private initPromise: Promise<void> | null = null
+
+  async initialize(): Promise<void> {
+    if (this.initPromise) {
+      return this.initPromise
+    }
+
+    this.initPromise = this.initializeModel()
+    return this.initPromise
+  }
+
+  private async initializeModel(): Promise<void> {
+    try {
+      console.log('Initializing sentence-transformers/all-mpnet-base-v2 model...')
+      this.extractor = await pipeline(
+        'feature-extraction',
+        'sentence-transformers/all-mpnet-base-v2',
+        {
+          quantized: true, // Use quantized model for better performance
+        }
+      )
+      console.log('Embedding model initialized successfully')
+    } catch (error) {
+      console.error('Failed to initialize embedding model:', error)
+      // Fallback to simple embedding if model fails to load
+      this.extractor = null
+    }
+  }
 
   async getEmbedding(text: string): Promise<number[]> {
     // Check cache first
@@ -8,14 +39,29 @@ export class EmbeddingService {
       return this.cache.get(text)!
     }
 
-    // Simple text-to-vector conversion (in production, use proper embeddings)
-    const embedding = this.textToVector(text)
+    let embedding: number[]
+
+    if (this.extractor) {
+      try {
+        // Use Hugging Face model
+        const output = await this.extractor(text, { pooling: 'mean', normalize: true })
+        embedding = Array.from(output.data)
+      } catch (error) {
+        console.error('Error getting embedding from model:', error)
+        // Fallback to simple embedding
+        embedding = this.textToVector(text)
+      }
+    } else {
+      // Fallback to simple embedding
+      embedding = this.textToVector(text)
+    }
+
     this.cache.set(text, embedding)
     return embedding
   }
 
   private textToVector(text: string): number[] {
-    // Simple hash-based embedding (replace with proper embeddings in production)
+    // Simple hash-based embedding (fallback)
     const words = text
       .toLowerCase()
       .split(/\W+/)
@@ -55,7 +101,18 @@ export class EmbeddingService {
       normB += b[i] * b[i]
     }
 
+    if (normA === 0 || normB === 0) return 0
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
+  }
+
+  // Get multiple embeddings efficiently
+  async getEmbeddings(texts: string[]): Promise<number[][]> {
+    const embeddings: number[][] = []
+    for (const text of texts) {
+      const embedding = await this.getEmbedding(text)
+      embeddings.push(embedding)
+    }
+    return embeddings
   }
 }
 
