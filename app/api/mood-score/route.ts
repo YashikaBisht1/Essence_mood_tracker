@@ -1,59 +1,91 @@
 import { NextResponse } from "next/server"
-import "server-only"
-import { z } from "zod"
-import { generateObject } from "ai"
+import { generateText } from "ai"
 import { groq } from "@ai-sdk/groq"
 
-// Schema for the LLM to follow strictly
-const MoodSchema = z.object({
-  score: z.number().min(0).max(10),
-  energy: z.number().min(0).max(10),
-  emotions: z.array(z.string()).max(5).optional(),
-  rationale: z.string().max(400).optional(),
-})
-
-const RequestSchema = z.object({
-  text: z.string().min(1),
-  userId: z.string().optional(),
-  personaId: z.string().optional(),
-})
+// Simple JSON extraction in case the model returns extra text.
+function extractJson(text: string) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/)
+    if (match) {
+      try {
+        return JSON.parse(match[0])
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+}
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
-    const { text, userId, personaId } = RequestSchema.parse(body)
+    const { text, personaId, userId } = await req.json()
 
-    const system = [
-      "You are a precise mood scoring service.",
-      "Return a JSON object that matches the provided schema.",
-      "Rules:",
-      "- score: integer 0..10 reflecting overall valence (0 very negative, 10 very positive).",
-      "- energy: integer 0..10 reflecting activation/arousal (0 very low, 10 very high).",
-      "- emotions: up to 5 concise emotion words.",
-      "- rationale: one-paragraph explanation, <= 400 chars, referencing the user text.",
-      personaId ? `Persona context: ${personaId}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n")
+    if (!text || typeof text !== "string") {
+      return NextResponse.json({ error: "Invalid 'text' in body" }, { status: 400 })
+    }
 
-    // Use Groq with the requested model: openai/gpt-oss-120b
-    const { object } = await generateObject({
-      model: groq("openai/gpt-oss-120b"),
+    // Use a Groq model via the AI SDK for structured mood scoring.
+    // Keep the instruction strict to return JSON only.
+    const system = `You are a precise mood scoring service. 
+Return a compact JSON object with strict numeric scales and no extra commentary.
+
+Rules:
+- mood: integer 1..10 (1 = very negative, 10 = very positive, 5 = neutral)
+- energy: integer 1..10 (1 = very low, 10 = very high)
+- label: "Positive" | "Neutral" | "Negative"
+- emotions: an array of 1-4 concise emotion words
+- rationale: one short sentence
+
+Output format:
+{"mood": number, "energy": number, "label":"Positive|Neutral|Negative", "emotions": ["..."], "rationale": "..."}`
+
+    const userPrompt = `Classify the user's latest message.
+
+Persona: ${personaId || "unknown"}
+User: ${userId || "anon"}
+Message: """${text}"""`
+
+    const { text: modelText } = await generateText({
+      // Using Groq model: llama-3.3-70b-versatile via the AI SDK Groq provider
+      model: groq("llama-3.3-70b-versatile"),
       system,
-      schema: MoodSchema,
-      prompt: `User text:\n"""${text}"""\n\nReturn ONLY the JSON.`,
+      prompt: userPrompt,
+      temperature: 0.2,
+      maxTokens: 250,
     })
+
+    const parsed = extractJson(modelText)
+    if (!parsed) {
+      return NextResponse.json(
+        {
+          error: "Failed to parse model output",
+          raw: modelText,
+        },
+        { status: 500 },
+      )
+    }
+
+    // Validate minimal shape
+    const result = {
+      mood: Math.max(1, Math.min(10, Number(parsed.mood) || 5)),
+      energy: Math.max(1, Math.min(10, Number(parsed.energy) || 5)),
+      label:
+        parsed.label === "Positive" || parsed.label === "Negative" || parsed.label === "Neutral"
+          ? parsed.label
+          : "Neutral",
+      emotions: Array.isArray(parsed.emotions) ? parsed.emotions.slice(0, 4).map(String) : [],
+      rationale: typeof parsed.rationale === "string" ? parsed.rationale : "",
+    }
 
     return NextResponse.json({
       ok: true,
-      userId,
-      personaId,
-      result: object,
-      model: "groq:openai/gpt-oss-120b",
-      at: new Date().toISOString(),
+      result,
     })
   } catch (err: any) {
     console.error("mood-score error:", err)
-    return NextResponse.json({ ok: false, error: err?.message ?? "Failed to score mood" }, { status: 400 })
+    return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 })
   }
 }

@@ -6,7 +6,14 @@ import { Line, LineChart, XAxis, YAxis, ResponsiveContainer, Bar, BarChart, Tool
 import type { Persona } from "@/types/persona"
 import { conversationManager } from "@/lib/conversation-manager"
 import { analyzeTextMood } from "@/lib/mood-analyzer"
-import { addMoodPoint, getMoodSeries, hasScoreForMessage, weeklyAggregates, type MoodPoint } from "@/lib/mood-storage"
+import {
+  addMoodPoint,
+  getMoodSeries,
+  hasScoreForMessage,
+  weeklyAggregates,
+  sanitizeMoodSeries,
+  type MoodPoint,
+} from "@/lib/mood-storage"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 
 interface MoodTimelineProps {
@@ -19,6 +26,15 @@ type SeriesItem = {
   energy: number
   label: string
   messageId: string
+}
+
+function isFiniteInRange(n: unknown, min: number, max: number) {
+  const x = Number(n)
+  return Number.isFinite(x) && x >= min && x <= max
+}
+
+function validLabelFromMood(mood: number) {
+  return mood >= 7 ? "Positive" : mood <= 4 ? "Negative" : "Neutral"
 }
 
 async function scoreWithLLM(text: string, personaId: string, userId: string | undefined) {
@@ -61,15 +77,29 @@ export function MoodTimeline({ persona }: MoodTimelineProps) {
 
   // Build chart series from stored mood points (LLM) as primary source
   function rebuildFromStorage() {
+    // Sanitize the stored series first (also rewrites bad data)
+    sanitizeMoodSeries(persona.id)
     const pts = getMoodSeries(persona.id)
+
     const sorted = [...pts].sort((a, b) => a.timestamp - b.timestamp)
-    const mapped: SeriesItem[] = sorted.slice(-24).map((p) => ({
-      time: new Date(p.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      mood: p.mood,
-      energy: p.energy,
-      label: p.label,
-      messageId: p.messageId,
-    }))
+    const filtered = sorted.filter(
+      (p) =>
+        isFiniteInRange(p.mood, 0, 10) &&
+        isFiniteInRange(p.energy, 0, 10) &&
+        Number.isFinite(new Date(p.timestamp).getTime()),
+    )
+
+    const mapped: SeriesItem[] = filtered.slice(-24).map((p) => {
+      const ts = Number.isFinite(new Date(p.timestamp).getTime()) ? p.timestamp : Date.now()
+      return {
+        time: new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        mood: Number(p.mood),
+        energy: Number(p.energy),
+        label: p.label || validLabelFromMood(Number(p.mood)),
+        messageId: p.messageId,
+      }
+    })
+
     setSeries(mapped)
     setWeekly(weeklyAggregates(persona.id))
   }
@@ -81,7 +111,6 @@ export function MoodTimeline({ persona }: MoodTimelineProps) {
     const last = userMsgs.slice(-12)
 
     if (last.length === 0) {
-      // Nothing to score
       rebuildFromStorage()
       return
     }
@@ -93,26 +122,36 @@ export function MoodTimeline({ persona }: MoodTimelineProps) {
           try {
             const response = await scoreWithLLM(m.content, persona.id, userId)
             const r = response.result
+            // Coerce and guard
+            const moodNum = Number(r.mood)
+            const energyNum = Number(r.energy)
+
+            const fallback = analyzeTextMood(m.content)
+            const mood = Number.isFinite(moodNum) ? Math.max(0, Math.min(10, Math.round(moodNum))) : fallback.mood
+            const energy = Number.isFinite(energyNum)
+              ? Math.max(0, Math.min(10, Math.round(energyNum)))
+              : fallback.energy
+
             const point: MoodPoint = {
               id: `${persona.id}:${m.id}`,
               personaId: persona.id,
               messageId: m.id,
-              timestamp: new Date(m.timestamp).getTime(),
-              mood: r.mood,
-              energy: r.energy,
-              label: r.label,
-              emotions: r.emotions || [],
-              rationale: r.rationale || "",
+              timestamp: new Date(m.timestamp).getTime() || Date.now(),
+              mood,
+              energy,
+              label: (r.label as "Positive" | "Neutral" | "Negative") || validLabelFromMood(mood),
+              emotions: Array.isArray(r.emotions) ? r.emotions.slice(0, 5) : [],
+              rationale: typeof r.rationale === "string" ? r.rationale.slice(0, 400) : "",
             }
             addMoodPoint(point)
-          } catch (llmErr) {
+          } catch {
             // Fallback to local heuristic if API fails
             const h = analyzeTextMood(m.content)
             const point: MoodPoint = {
               id: `${persona.id}:${m.id}`,
               personaId: persona.id,
               messageId: m.id,
-              timestamp: new Date(m.timestamp).getTime(),
+              timestamp: new Date(m.timestamp).getTime() || Date.now(),
               mood: h.mood,
               energy: h.energy,
               label: h.label as "Positive" | "Neutral" | "Negative",
@@ -146,9 +185,11 @@ export function MoodTimeline({ persona }: MoodTimelineProps) {
   }, [persona.id, userId])
 
   const moodAvg = useMemo(() => {
-    if (series.length === 0) return null
-    const sum = series.reduce((acc, d) => acc + d.mood, 0)
-    return Math.round((sum / series.length) * 10) / 10
+    const values = series.map((d) => Number(d.mood)).filter((n) => Number.isFinite(n))
+    if (values.length === 0) return null
+    const sum = values.reduce((acc, n) => acc + n, 0)
+    const avg = sum / values.length
+    return Number.isFinite(avg) ? Math.round(avg * 10) / 10 : null
   }, [series])
 
   const latest = series[series.length - 1]
@@ -230,7 +271,7 @@ export function MoodTimeline({ persona }: MoodTimelineProps) {
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "#1e293b",
-                      border: "1px solid #334155",
+                      border: '1px solid "#334155',
                       borderRadius: "8px",
                       color: "#a7f3d0",
                     }}

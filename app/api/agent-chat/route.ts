@@ -81,9 +81,9 @@ export async function POST(req: Request) {
 
     // Use AI SDK with Groq provider to generate text [^2]
     const { text } = await generateText({
-      model: groq("llama-3.1-8b-instant"),
+      // Using Groq model: llama-3.3-70b-versatile via the AI SDK Groq provider
+      model: groq("llama-3.3-70b-versatile"),
       system,
-      // If the client provided a new user message, use it. Otherwise, react to context.
       prompt:
         userMessage && userMessage.trim().length > 0
           ? userMessage
