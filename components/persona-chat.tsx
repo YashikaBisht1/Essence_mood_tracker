@@ -18,12 +18,31 @@ interface PersonaChatProps {
   userPoints: number
 }
 
+function getOrCreateUserId() {
+  try {
+    const key = "essence_user_id"
+    let id = localStorage.getItem(key)
+    if (!id) {
+      id = `u_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`
+      localStorage.setItem(key, id)
+    }
+    return id
+  } catch {
+    return "anon"
+  }
+}
+
 export function PersonaChat({ persona, onBack, onAddPoints, userPoints }: PersonaChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isRecording, setIsRecording] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [userId, setUserId] = useState<string>("anon")
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setUserId(getOrCreateUserId())
+  }, [])
 
   useEffect(() => {
     // Load conversation history
@@ -40,6 +59,10 @@ export function PersonaChat({ persona, onBack, onAddPoints, userPoints }: Person
       }
       setMessages([welcomeMessage])
       conversationManager.addMessage(persona.id, welcomeMessage)
+      // Notify listeners that conversation changed
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("conversation:updated", { detail: { personaId: persona.id } }))
+      }
     } else {
       setMessages(history)
     }
@@ -108,6 +131,10 @@ You should respond in character, using your unique speaking style and drawing fr
 
     setMessages((prev) => [...prev, userMessage])
     conversationManager.addMessage(persona.id, userMessage)
+    // Notify listeners that conversation changed
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("conversation:updated", { detail: { personaId: persona.id } }))
+    }
     setInputValue("")
     setIsLoading(true)
 
@@ -149,6 +176,10 @@ You should respond in character, using your unique speaking style and drawing fr
 
       setMessages((prev) => [...prev, personaMessage])
       conversationManager.addMessage(persona.id, personaMessage)
+      // Notify listeners that conversation changed
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("conversation:updated", { detail: { personaId: persona.id } }))
+      }
 
       // Award points
       if (personaMessage.points) {
@@ -163,6 +194,10 @@ You should respond in character, using your unique speaking style and drawing fr
         timestamp: new Date(),
       }
       setMessages((prev) => [...prev, errorMessage])
+      conversationManager.addMessage(persona.id, errorMessage)
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("conversation:updated", { detail: { personaId: persona.id } }))
+      }
     } finally {
       setIsLoading(false)
     }
